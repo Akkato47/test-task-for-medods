@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/mux"
 
@@ -27,17 +28,36 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	created, err := h.usecase.Create(r.Context(), taskusecase.CreateInput{
-		Title:       req.Title,
-		Description: req.Description,
-		Status:      req.Status,
+	scheduledDate, err := time.Parse(dateLayout, req.ScheduledDate)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, errors.New("scheduled_date: invalid format, expected YYYY-MM-DD"))
+		return
+	}
+
+	periodInput, err := req.Period.toPeriodInput()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	tasks, err := h.usecase.Create(r.Context(), taskusecase.CreateInput{
+		Title:         req.Title,
+		Description:   req.Description,
+		Status:        req.Status,
+		ScheduledDate: scheduledDate.UTC(),
+		Period:        periodInput,
 	})
 	if err != nil {
 		writeUsecaseError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, newTaskDTO(created))
+	response := make([]taskDTO, 0, len(tasks))
+	for i := range tasks {
+		response = append(response, newTaskDTO(&tasks[i]))
+	}
+
+	writeJSON(w, http.StatusCreated, response)
 }
 
 func (h *TaskHandler) GetByID(w http.ResponseWriter, r *http.Request) {
@@ -69,10 +89,13 @@ func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	scope := taskusecase.Scope(r.URL.Query().Get("scope"))
+
 	updated, err := h.usecase.Update(r.Context(), id, taskusecase.UpdateInput{
 		Title:       req.Title,
 		Description: req.Description,
 		Status:      req.Status,
+		Scope:       scope,
 	})
 	if err != nil {
 		writeUsecaseError(w, err)
@@ -89,7 +112,9 @@ func (h *TaskHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.usecase.Delete(r.Context(), id); err != nil {
+	scope := taskusecase.Scope(r.URL.Query().Get("scope"))
+
+	if err := h.usecase.Delete(r.Context(), id, scope); err != nil {
 		writeUsecaseError(w, err)
 		return
 	}
@@ -98,7 +123,22 @@ func (h *TaskHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
-	tasks, err := h.usecase.List(r.Context())
+	from, err := parseDateParam(r, "from")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	to, err := parseDateParam(r, "to")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	tasks, err := h.usecase.List(r.Context(), taskusecase.ListInput{
+		From: from,
+		To:   to,
+	})
 	if err != nil {
 		writeUsecaseError(w, err)
 		return
@@ -110,6 +150,22 @@ func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, response)
+}
+
+func parseDateParam(r *http.Request, name string) (*time.Time, error) {
+	raw := r.URL.Query().Get(name)
+	if raw == "" {
+		return nil, nil
+	}
+
+	t, err := time.Parse(dateLayout, raw)
+	if err != nil {
+		return nil, errors.New(name + ": invalid date format, expected YYYY-MM-DD")
+	}
+
+	t = t.UTC()
+
+	return &t, nil
 }
 
 func getIDFromRequest(r *http.Request) (int64, error) {

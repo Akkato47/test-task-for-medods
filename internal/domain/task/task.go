@@ -11,12 +11,20 @@ const (
 )
 
 type Task struct {
-	ID          int64     `json:"id"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	Status      Status    `json:"status"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID            int64     `json:"id"`
+	Title         string    `json:"title"`
+	Description   string    `json:"description"`
+	Status        Status    `json:"status"`
+	TemplateID    *int64    `json:"template_id,omitempty"`
+	ScheduledDate time.Time `json:"scheduled_date"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+type TaskPatch struct {
+	Title       string
+	Description string
+	Status      Status
 }
 
 func (s Status) Valid() bool {
